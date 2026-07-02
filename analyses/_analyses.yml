@@ -1,0 +1,8 @@
+version: 2
+
+analyses:
+  - name: consolidation_movers
+    description: |
+      Which states consolidated fastest: latest-year licensed herds and
+      cows-per-herd against the 2015 index, steepest herd-count decline
+      first. Exploratory only — the mart carries the tested logic.

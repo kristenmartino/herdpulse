@@ -1,0 +1,46 @@
+name: 'herdpulse'
+version: '0.1.0'
+config-version: 2
+
+require-dbt-version: [">=1.8.0", "<2.0.0"]
+
+profile: 'herdpulse'
+
+model-paths:    ["models"]
+seed-paths:     ["seeds"]
+test-paths:     ["tests"]
+macro-paths:    ["macros"]
+snapshot-paths: ["snapshots"]
+analysis-paths: ["analyses"]
+
+models:
+  herdpulse:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: table
+      +schema: intermediate
+    marts:
+      +materialized: table
+      +schema: marts
+
+seeds:
+  herdpulse:
+    +schema: raw
+    nass:
+      # All four NASS seeds share one trimmed Quick Stats schema. `value` is
+      # pinned varchar on purpose — NASS formats numbers with commas and may
+      # emit suppression codes; parsing belongs to staging (parse_nass_value),
+      # so the seed stays a faithful snapshot of the pull. `state_fips` is
+      # varchar to preserve leading zeros.
+      +column_types:
+        year: integer
+        freq_desc: varchar
+        reference_period_desc: varchar
+        state_name: varchar
+        state_alpha: varchar
+        state_fips: varchar
+        short_desc: varchar
+        unit_desc: varchar
+        value: varchar

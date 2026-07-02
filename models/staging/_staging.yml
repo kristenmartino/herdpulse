@@ -1,0 +1,138 @@
+version: 2
+
+models:
+  - name: stg_nass__milk_production_monthly
+    description: |
+      Cleaned monthly milk production at state × month grain. Parses the
+      verbatim NASS value (comma-stripped, try_cast — non-numeric → NULL,
+      never zero), builds a month_date from year + period, and flags US-total
+      rows. Quarterly rollup rows for non-major states are dropped: NASS
+      publishes true monthly values only for the 24 major milk-producing
+      states + the US total.
+    columns:
+      - name: month_date
+        description: First day of the observation month (grain key with state_alpha).
+        tests:
+          - not_null
+      - name: state_alpha
+        description: USPS state code; 'US' for the national rows.
+        tests:
+          - not_null
+      - name: state_fips
+        description: 2-digit state FIPS code as text; empty for national rows.
+      - name: is_us_total
+        description: True for the NATIONAL-aggregation rows. Kept (not dropped) because the KPI strip and the reconciliation singular test need them.
+        tests:
+          - not_null
+      - name: milk_production_lb
+        description: Milk produced in the month, pounds. NULL only if NASS ever suppresses a cell — no not_null by design.
+      - name: unit_desc
+        description: NASS unit string — constant 'LB' for this series.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['LB']
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, month_date]
+
+  - name: stg_nass__milk_per_cow_monthly
+    description: |
+      Cleaned monthly milk-per-cow yield (lb/head) at state × month grain,
+      24 major states + flagged US total. The monthly input to the
+      rolling-12-month per-cow metric — the public-aggregate analog of the
+      Rolling Herd Average a dairy manager watches.
+    columns:
+      - name: month_date
+        description: First day of the observation month (grain key with state_alpha).
+        tests:
+          - not_null
+      - name: state_alpha
+        description: USPS state code; 'US' for the national rows.
+        tests:
+          - not_null
+      - name: is_us_total
+        description: True for the NATIONAL-aggregation rows.
+        tests:
+          - not_null
+      - name: milk_per_cow_lb
+        description: Pounds of milk per head for the month. Roughly 1,500–2,300 across states and seasons (annual per-cow ≈ 24,000 lb).
+      - name: unit_desc
+        description: NASS unit string — constant 'LB / HEAD' for this series.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['LB / HEAD']
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, month_date]
+
+  - name: stg_nass__milk_cow_inventory_monthly
+    description: |
+      Average milk cows during the month (head) at state × month grain,
+      24 major states + flagged US total. Sourced from the INVENTORY, AVG
+      series (the Milk Production report's cow numbers), not the semi-annual
+      point-in-time cattle survey — see data/README.md for the discovery note.
+    columns:
+      - name: month_date
+        description: First day of the observation month (grain key with state_alpha).
+        tests:
+          - not_null
+      - name: state_alpha
+        description: USPS state code; 'US' for the national rows.
+        tests:
+          - not_null
+      - name: is_us_total
+        description: True for the NATIONAL-aggregation rows.
+        tests:
+          - not_null
+      - name: milk_cow_head
+        description: Average number of milk cows during the month, head.
+      - name: unit_desc
+        description: NASS unit string — constant 'HEAD' for this series.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['HEAD']
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, month_date]
+
+  - name: stg_nass__licensed_herds_annual
+    description: |
+      Licensed dairy herds at state × year grain, with flagged US-total and
+      OTHER STATES rows. Annual counts of operations with a licensed dairy
+      herd — the denominator of cows-per-herd and the heart of the
+      consolidation story.
+    columns:
+      - name: year
+        description: Calendar year (grain key with state_alpha).
+        tests:
+          - not_null
+      - name: state_alpha
+        description: USPS state code; 'US' national, 'OT' OTHER STATES rollup.
+        tests:
+          - not_null
+      - name: is_us_total
+        description: True for the NATIONAL-aggregation rows.
+        tests:
+          - not_null
+      - name: licensed_herds
+        description: Count of licensed dairy operations in the state-year.
+      - name: unit_desc
+        description: NASS unit string — constant 'OPERATIONS' for this series.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['OPERATIONS']
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, year]

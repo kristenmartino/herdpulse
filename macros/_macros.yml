@@ -1,0 +1,82 @@
+version: 2
+
+macros:
+  - name: generate_schema_name
+    description: |
+      Custom schema resolution: uses the per-layer `+schema:` values from
+      dbt_project.yml verbatim (raw / staging / intermediate / marts) instead
+      of dbt's default target-prefixed names, so the DuckDB file reads cleanly.
+    arguments:
+      - name: custom_schema_name
+        type: string
+        description: The `+schema:` value from config, or none.
+      - name: node
+        type: node
+        description: The dbt node being resolved (unused; required signature).
+
+  - name: zscore
+    description: |
+      Classical z-score: (value − mean) / stddev. NULL when stddev is 0 or any
+      input is NULL — never a divide-by-zero. Ported unchanged from
+      medicare-provider-outliers.
+    arguments:
+      - name: value
+        type: string
+        description: Column or expression holding the observed value.
+      - name: mean
+        type: string
+        description: Peer-distribution mean.
+      - name: stddev
+        type: string
+        description: Peer-distribution standard deviation.
+
+  - name: modified_zscore
+    description: |
+      MAD-based modified z-score: mad_constant × (value − median) / MAD,
+      robust to skewed distributions (Iglewicz & Hoaglin, 1993). NULL when
+      MAD is 0. Ported unchanged from medicare-provider-outliers.
+    arguments:
+      - name: value
+        type: string
+        description: Column or expression holding the observed value.
+      - name: median
+        type: string
+        description: Peer-distribution median.
+      - name: mad
+        type: string
+        description: Peer-distribution median absolute deviation.
+      - name: mad_constant
+        type: float
+        description: Consistency constant (default 0.6745, normal-equivalent).
+
+  - name: is_outlier
+    description: |
+      True when |score| ≥ threshold; NULL scores propagate to NULL, so a
+      missing benchmark never silently flags (or clears) a row.
+    arguments:
+      - name: score
+        type: string
+        description: A z-score or modified z-score column.
+      - name: threshold
+        type: float
+        description: Flagging threshold (2.0 classical / 3.5 MAD are canonical).
+
+  - name: nass_period_to_month_num
+    description: |
+      Maps Quick Stats monthly reference_period_desc (JAN..DEC) to 1..12.
+      Quarterly rollups ('JAN THRU MAR') and 'YEAR' return NULL — staging
+      models use that NULL to filter down to true monthly grain.
+    arguments:
+      - name: period_col
+        type: string
+        description: The reference_period_desc column.
+
+  - name: parse_nass_value
+    description: |
+      Parses a NASS `value` cell: strips thousands commas, try_casts to
+      double. Suppression / unavailable codes ((D), (NA), (Z)) become NULL,
+      never zero.
+    arguments:
+      - name: value_col
+        type: string
+        description: The verbatim NASS value column.

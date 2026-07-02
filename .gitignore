@@ -1,0 +1,50 @@
+# Python / venv
+.venv/
+__pycache__/
+*.pyc
+.python-version
+
+# dbt
+target/
+dbt_packages/
+logs/
+.user.yml
+
+# Local profiles — never commit credentials (kept even though DuckDB has none; convention)
+profiles.yml
+.dbt/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local warehouse + data dumps (seeds are the committed raw layer)
+data/*
+!data/README.md
+*.duckdb
+*.csv
+*.csv.gz
+*.parquet
+!seeds/**/*.csv
+# Dashboard mart extracts — small JSON, intentionally committed so the
+# dashboard runs from a fresh clone without a warehouse.
+!dashboard/public/data/*.json
+
+# Dashboard build artifacts
+dashboard/node_modules/
+dashboard/dist/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Internal build scaffolding — never push
+CLAUDE_CODE_PROMPT.md
+ZOETIS_COVER_PARAGRAPH.md
+README_SKELETON.md
+
+# Local agent tooling
+.claude/

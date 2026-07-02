@@ -1,0 +1,198 @@
+version: 2
+
+models:
+  - name: mart_state_production_trends
+    description: |
+      Production and per-cow yield trends at state × month grain, US-total
+      rows flagged and included (they feed the dashboard KPI strip).
+      Year-over-year compares the same month a year prior; trailing-12-month
+      metrics are NULL until a full window exists. rolling_12m_milk_per_cow_lb
+      is the public-aggregate analog of a Rolling Herd Average — the
+      trailing-year per-cow benchmark a dairy manager watches month to month.
+    columns:
+      - name: state_alpha
+        description: USPS state code (grain key with month_date); 'US' for national rows.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_state_milk__monthly')
+                field: state_alpha
+      - name: month_date
+        description: First day of the observation month (grain key with state_alpha).
+        tests:
+          - not_null
+      - name: is_us_total
+        description: True for national rows — exclude before cross-state aggregation.
+        tests:
+          - not_null
+      - name: milk_production_lb
+        description: Milk produced in the month, pounds.
+      - name: production_yoy_pct
+        description: Production change vs the same month a year prior; NULL for the first 12 months of a series.
+      - name: per_cow_yoy_pct
+        description: Per-cow yield change vs the same month a year prior.
+      - name: rolling_12m_production_lb
+        description: Trailing-12-month production, pounds; NULL until 12 months exist.
+      - name: rolling_12m_milk_per_cow_lb
+        description: Trailing-12-month per-cow yield, pounds — the RHA analog; NULL until 12 months exist.
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, month_date]
+
+  - name: mart_productivity_ranking
+    description: |
+      Per-cow productivity ranking at state × year grain: each state's annual
+      milk-per-cow scored against the national distribution of published
+      states for that year. Reuses the peer-benchmarking methodology from
+      medicare-provider-outliers — classical z-score plus MAD-based modified
+      z-score (0.6745 × (x − median) / MAD; Iglewicz & Hoaglin) — with the
+      peer group swapped from (taxonomy × state) cells to the ~24-state
+      national set, which is fixed and known, so no minimum-coverage floor is
+      gated (n_states is exposed instead). Complete years only; US-total rows
+      excluded from both scoring and the benchmark itself.
+    columns:
+      - name: state_alpha
+        description: USPS state code (grain key with year); never 'US' here.
+        tests:
+          - not_null
+      - name: year
+        description: Calendar year (grain key with state_alpha); complete years only.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_productivity__national_benchmark')
+                field: year
+      - name: annual_milk_per_cow_lb
+        description: The state's annual per-cow yield, pounds — the ranked measure.
+        tests:
+          - not_null
+      - name: per_cow_zscore
+        description: Classical z-score vs the national mean/stddev for the year.
+        tests:
+          - not_null
+      - name: per_cow_modified_zscore
+        description: MAD-based modified z-score vs the national median — robust to skew; NULL if MAD is 0.
+      - name: productivity_rank
+        description: Rank within the year, 1 = highest per-cow yield.
+      - name: per_cow_percentile
+        description: percent_rank within the year — 1.0 is the most productive state, 0.0 the least.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: is_productivity_outlier
+        description: |
+          True when |z| ≥ 2.0 — either tail: exceptional per-cow performers
+          and structural laggards both flag. NULL z (zero national stddev,
+          which cannot happen with real data) propagates to NULL rather than
+          silently clearing.
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, year]
+
+  - name: mart_herd_consolidation
+    description: |
+      The structural-consolidation story at state × year grain: licensed
+      dairy herds (the long decline), cows-per-herd (the rise), year-over-year
+      change, and herds_index_2015 (first observed year = 100). US-total and
+      OTHER STATES rows are flagged and included — the national herd count is
+      the headline KPI. cows_per_herd is NULL outside the 24 major states,
+      where NASS does not publish monthly cow inventory.
+    columns:
+      - name: state_alpha
+        description: USPS state code (grain key with year); includes 'US' and 'OT', flagged.
+        tests:
+          - not_null
+      - name: year
+        description: Calendar year (grain key with state_alpha).
+        tests:
+          - not_null
+      - name: licensed_herds
+        description: Licensed dairy operations in the state-year.
+      - name: cows_per_herd
+        description: Average herd size — avg cows / licensed herds; NULL where cow inventory is unpublished.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 5000
+              config:
+                where: "cows_per_herd is not null"
+      - name: licensed_herds_yoy_pct
+        description: Herd-count change vs prior year — persistently negative nationally.
+      - name: herds_index_2015
+        description: Licensed herds indexed to the state's first observed year (2015 = 100 for every series in this pull).
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, year]
+
+unit_tests:
+  - name: ranking_zscore_arithmetic
+    description: |
+      Known distribution in, known scores out: value 30,000 vs mean 24,000 /
+      stddev 3,000 must yield z = 2.0 exactly; the same deviation vs median
+      24,000 / MAD 6,000 must yield modified-z = 0.6745 (the consistency
+      constant × 1).
+    model: mart_productivity_ranking
+    given:
+      - input: ref('int_state_milk__annual')
+        rows:
+          - {state_alpha: CA, state_name: CALIFORNIA, year: 2024, annual_milk_per_cow_lb: 30000, is_us_total: false, is_complete_year: true}
+      - input: ref('int_productivity__national_benchmark')
+        rows:
+          - {year: 2024, n_states: 24, mean_milk_per_cow_lb: 24000, stddev_milk_per_cow_lb: 3000, median_milk_per_cow_lb: 24000, mad_milk_per_cow_lb: 6000}
+    expect:
+      rows:
+        - {state_alpha: CA, per_cow_zscore: 2.0, per_cow_modified_zscore: 0.6745}
+
+  - name: ranking_orders_states_within_year
+    description: |
+      Three states with distinct yields must rank 1/2/3 by descending
+      per-cow, with percent_rank 1.0 / 0.5 / 0.0.
+    model: mart_productivity_ranking
+    given:
+      - input: ref('int_state_milk__annual')
+        rows:
+          - {state_alpha: CA, year: 2024, annual_milk_per_cow_lb: 30000, is_us_total: false, is_complete_year: true}
+          - {state_alpha: WI, year: 2024, annual_milk_per_cow_lb: 24000, is_us_total: false, is_complete_year: true}
+          - {state_alpha: FL, year: 2024, annual_milk_per_cow_lb: 20000, is_us_total: false, is_complete_year: true}
+      - input: ref('int_productivity__national_benchmark')
+        rows:
+          - {year: 2024, n_states: 3, mean_milk_per_cow_lb: 24666, stddev_milk_per_cow_lb: 5033, median_milk_per_cow_lb: 24000, mad_milk_per_cow_lb: 4000}
+    expect:
+      rows:
+        - {state_alpha: CA, productivity_rank: 1, per_cow_percentile: 1.0}
+        - {state_alpha: WI, productivity_rank: 2, per_cow_percentile: 0.5}
+        - {state_alpha: FL, productivity_rank: 3, per_cow_percentile: 0.0}
+
+  - name: ranking_flag_flips_at_threshold_and_gates_hold
+    description: |
+      The outlier flag must fire on |z| ≥ 2.0 — both tails — and stay quiet in
+      between. US-total and incomplete-year rows must not reach scoring at
+      all: the expected output has exactly three rows.
+    model: mart_productivity_ranking
+    given:
+      - input: ref('int_state_milk__annual')
+        rows:
+          - {state_alpha: ID, year: 2024, annual_milk_per_cow_lb: 30000, is_us_total: false, is_complete_year: true}
+          - {state_alpha: WI, year: 2024, annual_milk_per_cow_lb: 26000, is_us_total: false, is_complete_year: true}
+          - {state_alpha: FL, year: 2024, annual_milk_per_cow_lb: 16000, is_us_total: false, is_complete_year: true}
+          - {state_alpha: US, year: 2024, annual_milk_per_cow_lb: 26000, is_us_total: true,  is_complete_year: true}
+          - {state_alpha: AZ, year: 2024, annual_milk_per_cow_lb: 12000, is_us_total: false, is_complete_year: false}
+      - input: ref('int_productivity__national_benchmark')
+        rows:
+          - {year: 2024, n_states: 3, mean_milk_per_cow_lb: 24000, stddev_milk_per_cow_lb: 3000, median_milk_per_cow_lb: 24000, mad_milk_per_cow_lb: 4000}
+    expect:
+      rows:
+        - {state_alpha: ID, is_productivity_outlier: true}
+        - {state_alpha: WI, is_productivity_outlier: false}
+        - {state_alpha: FL, is_productivity_outlier: true}

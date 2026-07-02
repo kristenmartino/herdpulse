@@ -1,0 +1,10 @@
+# Copy to profiles.yml (gitignored) — dbt is invoked with --profiles-dir .
+# DuckDB holds no credentials; the copy step is kept anyway so the repo shape
+# matches my other projects, where profiles.yml carries real secrets.
+herdpulse:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: data/herdpulse.duckdb
+      threads: 4

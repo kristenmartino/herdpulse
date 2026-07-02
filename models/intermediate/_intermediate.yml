@@ -1,0 +1,143 @@
+version: 2
+
+models:
+  - name: int_state_milk__monthly
+    description: |
+      The join backbone: one row per state × month combining monthly
+      production (lb), per-cow yield (lb/head), and average cow inventory
+      (head). Keys are the union across the three inputs so the grain stays
+      honest if one series publishes ahead of the others; measures are
+      left-joined, so a missing series is a NULL, never a dropped month.
+      US-total rows ride along flagged.
+    columns:
+      - name: state_alpha
+        description: USPS state code (grain key with month_date); 'US' for national rows.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_nass__milk_production_monthly')
+                field: state_alpha
+      - name: month_date
+        description: First day of the observation month (grain key with state_alpha).
+        tests:
+          - not_null
+      - name: is_us_total
+        description: True for national rows — consumers must exclude these before any cross-state aggregation or the totals double-count.
+        tests:
+          - not_null
+      - name: milk_production_lb
+        description: Milk produced in the month, pounds.
+      - name: milk_per_cow_lb
+        description: Milk per head for the month, pounds.
+      - name: milk_cow_head
+        description: Average milk cows during the month, head.
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, month_date]
+
+  - name: int_state_milk__annual
+    description: |
+      Annual rollup of the monthly backbone at state × year grain.
+      annual_milk_per_cow_lb sums the twelve monthly lb/head values (the
+      standard annual per-cow figure); avg_milk_cow_head averages the monthly
+      inventory. is_complete_year is the guard that keeps the partial current
+      year out of the productivity ranking and the national benchmark.
+    columns:
+      - name: state_alpha
+        description: USPS state code (grain key with year).
+        tests:
+          - not_null
+      - name: year
+        description: Calendar year (grain key with state_alpha).
+        tests:
+          - not_null
+      - name: annual_production_lb
+        description: Total milk produced across reported months, pounds.
+      - name: annual_milk_per_cow_lb
+        description: Sum of monthly per-cow yields — annual lb/head. Only meaningful when is_complete_year.
+      - name: avg_milk_cow_head
+        description: Average of monthly cow inventory across reported months.
+      - name: months_reported
+        description: Number of months present for the state-year (12 for complete years; the current year runs short until December publishes).
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 12
+      - name: is_complete_year
+        description: True when all 12 months are present — the eligibility gate for ranking and benchmarking.
+        tests:
+          - not_null
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, year]
+
+  - name: int_productivity__national_benchmark
+    description: |
+      National benchmark distribution of annual per-cow yield: one row per
+      complete year, over real states only (US-total excluded, so the
+      benchmark is a distribution of peers, not a mixture of peers and their
+      own total). Carries the four distribution statistics the scoring mart
+      needs — mean/stddev for the classical z-score, median/MAD for the
+      modified z-score — mirroring the peer-group-stats model in
+      medicare-provider-outliers. MAD is computed two-pass (window median,
+      then median absolute deviation).
+    columns:
+      - name: year
+        description: Calendar year (grain key).
+        tests:
+          - not_null
+          - unique
+      - name: n_states
+        description: States in the year's distribution — the 24 NASS-published majors; stated here rather than gated (unlike Medicare's n ≥ 30 floor, the peer set is fixed and known).
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 20
+                max_value: 30
+      - name: mean_milk_per_cow_lb
+        description: National mean of state annual per-cow yields.
+        tests:
+          - not_null
+      - name: stddev_milk_per_cow_lb
+        description: National standard deviation of state annual per-cow yields.
+      - name: median_milk_per_cow_lb
+        description: National median of state annual per-cow yields.
+      - name: mad_milk_per_cow_lb
+        description: Median absolute deviation of state annual per-cow yields — the robust spread behind the modified z-score.
+
+  - name: int_herd_counts__annual
+    description: |
+      Licensed herd counts joined to annual average cow inventory at state ×
+      year grain, deriving cows_per_herd. Herd counts cover ~48 states + US
+      + OTHER STATES; cow inventory only the 24 majors + US, so cows_per_herd
+      is NULL outside the majors by construction.
+    columns:
+      - name: state_alpha
+        description: USPS state code (grain key with year); includes 'US' and 'OT'.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_nass__licensed_herds_annual')
+                field: state_alpha
+      - name: year
+        description: Calendar year (grain key with state_alpha).
+        tests:
+          - not_null
+      - name: licensed_herds
+        description: Licensed dairy operations in the state-year.
+      - name: avg_milk_cow_head
+        description: Average milk cows during the year (NULL outside the 24 majors + US).
+      - name: cows_per_herd
+        description: avg_milk_cow_head / licensed_herds — herd-scale, the rising half of the consolidation story. NULL where inventory is unpublished.
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, year]

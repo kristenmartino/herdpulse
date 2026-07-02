@@ -1,0 +1,105 @@
+version: 2
+
+seeds:
+  - name: nass_milk_production_monthly
+    description: |
+      Raw USDA NASS Quick Stats pull: MILK - PRODUCTION, MEASURED IN LB
+      (SURVEY / DAIRY / freq MONTHLY, year ≥ 2015), fetched at both STATE and
+      NATIONAL aggregation by scripts/fetch_nass.py. Because this project's
+      raw layer ships as seeds, source provenance lives here rather than in a
+      _sources.yml — the exact query parameters are documented in
+      data/README.md. Monthly rows cover the 24 major milk-producing states
+      plus the US total; the remaining states appear only as quarterly
+      rollups ('JAN THRU MAR', …), which staging drops. `value` is verbatim
+      NASS text (comma-formatted); parsing happens in staging.
+    columns:
+      - name: year
+        description: Calendar year of the observation.
+        tests:
+          - not_null
+      - name: reference_period_desc
+        description: NASS period label — JAN..DEC for monthly rows, 'JAN THRU MAR' style for quarterly rollups.
+      - name: state_alpha
+        description: USPS state code; 'US' for national rows, 'OT' for OTHER STATES rollups.
+        tests:
+          - not_null
+      - name: state_fips
+        description: 2-digit state FIPS code as text (leading zeros preserved).
+      - name: value
+        description: Verbatim NASS value — comma-formatted pounds of milk produced.
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, year, reference_period_desc]
+
+  - name: nass_milk_per_cow_monthly
+    description: |
+      Raw USDA NASS Quick Stats pull: MILK - PRODUCTION, MEASURED IN LB / HEAD
+      (SURVEY / DAIRY / freq MONTHLY, year ≥ 2015), STATE + NATIONAL grains.
+      Milk per cow for the 24 major states + US total. Query parameters in
+      data/README.md; `value` verbatim, parsed in staging.
+    columns:
+      - name: year
+        tests:
+          - not_null
+      - name: state_alpha
+        description: USPS state code; 'US' for national rows.
+        tests:
+          - not_null
+      - name: value
+        description: Verbatim NASS value — pounds of milk per head, monthly.
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, year, reference_period_desc]
+
+  - name: nass_milk_cow_inventory_monthly
+    description: |
+      Raw USDA NASS Quick Stats pull: CATTLE, COWS, MILK - INVENTORY, AVG,
+      MEASURED IN HEAD (SURVEY / LIVESTOCK / freq MONTHLY, year ≥ 2015),
+      STATE + NATIONAL grains. This is the Milk Production report's monthly
+      "average number of milk cows during month" series — NOT the semi-annual
+      Jan 1 / Jul 1 point-in-time cattle inventory (statisticcat INVENTORY),
+      a distinction discovered via get_param_values and documented in
+      data/README.md.
+    columns:
+      - name: year
+        tests:
+          - not_null
+      - name: state_alpha
+        description: USPS state code; 'US' for national rows.
+        tests:
+          - not_null
+      - name: value
+        description: Verbatim NASS value — average milk-cow head during the month.
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, year, reference_period_desc]
+
+  - name: nass_licensed_herds_annual
+    description: |
+      Raw USDA NASS Quick Stats pull: CATTLE, COWS, MILK, LICENSED HERD -
+      OPERATIONS WITH INVENTORY, AVG (SURVEY / LIVESTOCK / freq ANNUAL,
+      year ≥ 2015), STATE + NATIONAL grains. Annual licensed dairy-herd counts
+      — the series behind the structural-consolidation story. Not published
+      under DAIRY/MILK as one might guess; found via a sector-wide short_desc
+      search (data/README.md).
+    columns:
+      - name: year
+        tests:
+          - not_null
+      - name: state_alpha
+        description: USPS state code; 'US' for national rows, 'OT' for OTHER STATES.
+        tests:
+          - not_null
+      - name: value
+        description: Verbatim NASS value — count of licensed dairy operations.
+    config:
+      tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments:
+              combination_of_columns: [state_alpha, year, reference_period_desc]
